@@ -15,7 +15,7 @@ private func CGSCopyWindowsWithOptionsAndTags(
     _ spaces: CFArray,
     _ options: Int,
     _ setTags: UnsafeMutablePointer<Int>,
-    _ clearTags: UnsafeMutablePointer<Int>
+    _ clearTags: UnsafeMutablePointer<Int>,
 ) -> CFArray
 
 // MARK: - Space ID lookup (also private)
@@ -40,7 +40,7 @@ func getTabbedWindowIds() -> Set<UInt32> {
     var setTags: Int = 0
     var clearTags: Int = 0
     let cgsWindows = CGSCopyWindowsWithOptionsAndTags(
-        cid, 0, [activeSpace] as CFArray, 2, &setTags, &clearTags
+        cid, 0, [activeSpace] as CFArray, 2, &setTags, &clearTags,
     ) as? [CGWindowID] ?? []
     let cgsWindowSet = Set(cgsWindows)
 
