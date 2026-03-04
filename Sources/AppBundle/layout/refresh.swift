@@ -4,6 +4,17 @@ import Common
 @MainActor
 private var activeRefreshTask: Task<(), any Error>? = nil
 
+/// Window IDs that are inactive tabs in a macOS native tab group.
+/// Updated each refresh cycle. Checked during window registration to
+/// route inactive tabs to the popup container.
+@MainActor
+var currentTabbedWindowIds: Set<UInt32> = []
+
+/// Windows that were moved to popup container because they are inactive tabs.
+/// Tracked separately so we can re-activate them when they become the active tab.
+@MainActor
+private(set) var windowsHiddenDueToTabbing: Set<UInt32> = []
+
 @MainActor
 func scheduleRefreshSession(
     _ event: RefreshSessionEvent,
@@ -109,6 +120,9 @@ func refreshModel() {
 
 @MainActor
 private func refresh() async throws {
+    // Detect inactive tabs before processing windows
+    currentTabbedWindowIds = getTabbedWindowIds()
+
     // Garbage collect terminated apps and windows before working with all windows
     let mapping = try await MacApp.refreshAllAndGetAliveWindowIds(frontmostAppBundleId: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
     let aliveWindowIds = mapping.values.flatMap { $0 }.toSet()
@@ -123,6 +137,27 @@ private func refresh() async throws {
             try await MacWindow.getOrRegister(windowId: windowId, macApp: app)
         }
     }
+
+    // Re-classify windows whose tab status changed
+    let previouslyHidden = windowsHiddenDueToTabbing
+    var nowHidden = Set<UInt32>()
+
+    for window in MacWindow.allWindows {
+        let isTabbed = currentTabbedWindowIds.contains(window.windowId)
+
+        if isTabbed {
+            if !(window.parent is MacosPopupWindowsContainer) {
+                // Became an inactive tab — hide it
+                window.bind(to: macosPopupWindowsContainer, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST)
+            }
+            nowHidden.insert(window.windowId)
+        } else if previouslyHidden.contains(window.windowId) && window.parent is MacosPopupWindowsContainer {
+            // Was hidden due to tabbing, now the active tab — re-tile it
+            try await window.relayoutWindow(on: focus.workspace)
+        }
+    }
+
+    windowsHiddenDueToTabbing = nowHidden
 
     // Garbage collect workspaces after apps, because workspaces contain apps.
     Workspace.garbageCollectUnusedWorkspaces()
